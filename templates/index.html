@@ -15,9 +15,15 @@
         <p><em>Written by {{ post.author }}</em></p>
         <p>{{ post.content }}</p>
         <p><em>ID: {{ post.id }}</em></p>
+        <p>Likes: {{ post.likes }}</p>
         <p>
             <a href="{{ url_for('update', post_id=post.id) }}" class="update-button">Update</a>
-            <a href="{{ url_for('delete', post_id=post.id) }}" class="delete-button">Delete</a>
+            <form method="POST" action="{{ url_for('delete', post_id=post.id) }}" style="display: inline;">
+                <button type="submit" class="delete-button">Delete</button>
+            </form>
+            <form method="POST" action="{{ url_for('like', post_id=post.id) }}" style="display: inline;">
+                <button type="submit" class="like-button">Like</button>
+            </form>
         </p>
     </div>
     {% endfor %}

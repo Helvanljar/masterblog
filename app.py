@@ -1,28 +1,48 @@
 from flask import Flask, render_template, request, redirect, url_for
 import json
+import logging
+from jinja2.exceptions import TemplateNotFound
+from html import escape
 
 app = Flask(__name__)
+
+# Set up logging
+logging.basicConfig(filename='app.log', level=logging.ERROR,
+                    format='%(asctime)s - %(levelname)s - %(message)s')
 
 
 def load_posts():
     """Load blog posts from posts.json or return default posts if file is missing."""
     try:
         with open('posts.json', 'r') as file:
-            return json.load(file)
-    except (FileNotFoundError, json.JSONDecodeError):
-        # Return default posts if file doesn't exist or is invalid
+            posts = json.load(file)
+        # Validate posts structure
+        if not isinstance(posts, list):
+            raise ValueError("posts.json must contain a list")
+        for post in posts:
+            if not all(isinstance(post.get(key), str) for key in ['author', 'title', 'content']):
+                raise ValueError("Invalid post data in posts.json")
+            if not isinstance(post.get('id'), int):
+                raise ValueError("Invalid post ID in posts.json")
+            if not isinstance(post.get('likes'), int):
+                raise ValueError("Invalid likes value in posts.json")
+        return posts
+    except (FileNotFoundError, json.JSONDecodeError, ValueError) as e:
+        logging.error(f"Failed to load posts: {str(e)}")
         return [
             {
                 "id": 1,
                 "author": "John Doe",
                 "title": "First Post",
-                "content": "This is my first post."
+                "content": "This is my first post.",
+                "likes": 0
             },
             {
                 "id": 2,
                 "author": "Jane Doe",
                 "title": "Second Post",
-                "content": "This is another post."
+                "content": "This is another post.",
+                "likes": 0
             }
         ]
 
@@ -32,8 +52,8 @@ def save_posts(posts):
     try:
         with open('posts.json', 'w') as file:
             json.dump(posts, file, indent=4)
-    except (IOError, PermissionError):
-        # Log error or handle gracefully (for now, return False to indicate failure)
+    except (IOError, PermissionError) as e:
+        logging.error(f"Failed to save posts: {str(e)}")
         return False
     return True
 
@@ -62,23 +82,27 @@ def validate_post_data(author, title, content):
 @app.route('/')
 def index():
     """Display the list of blog posts."""
-    posts = load_posts()
-    return render_template('index.html', posts=posts)
+    try:
+        posts = load_posts()
+        return render_template('index.html', posts=posts)
+    except TemplateNotFound as e:
+        logging.error(f"Template not found: {str(e)}")
+        return render_template('error.html', message="Template not found", status=500)
 
 
 @app.route('/add', methods=['GET', 'POST'])
 def add():
     """Handle adding a new blog post."""
     if request.method == 'POST':
-        # Get form data
-        author = request.form.get('author')
-        title = request.form.get('title')
-        content = request.form.get('content')
+        # Get and sanitize form data
+        author = escape(request.form.get('author', ''))
+        title = escape(request.form.get('title', ''))
+        content = escape(request.form.get('content', ''))
 
         # Validate inputs
         is_valid, error = validate_post_data(author, title, content)
         if not is_valid:
-            return error, 400
+            return render_template('error.html', message=error, status=400)
 
         # Load existing posts
         posts = load_posts()
@@ -91,25 +115,32 @@ def add():
             "id": new_id,
             "author": author,
             "title": title,
-            "content": content
+            "content": content,
+            "likes": 0
         }
 
         # Add new post and save to JSON
         posts.append(new_post)
         if not save_posts(posts):
-            return "Failed to save post", 500
+            logging.error("Failed to save new post")
+            return render_template('error.html', message="Failed to save post", status=500)
 
         return redirect(url_for('index'))
 
-    return render_template('add.html')
+    try:
+        return render_template('add.html')
+    except TemplateNotFound as e:
+        logging.error(f"Template not found: {str(e)}")
+        return render_template('error.html', message="Template not found", status=500)
 
 
-@app.route('/delete/<int:post_id>')
+@app.route('/delete/<int:post_id>', methods=['POST'])
 def delete(post_id):
     """Delete a blog post by its ID."""
     # Check if post exists
     if fetch_post_by_id(post_id) is None:
-        return "Post not found", 404
+        logging.error(f"Post not found: ID {post_id}")
+        return render_template('error.html', message="Post not found", status=404)
 
     # Load existing posts
     posts = load_posts()
@@ -119,7 +150,8 @@ def delete(post_id):
 
     # Save updated posts
     if not save_posts(posts):
-        return "Failed to save changes", 500
+        logging.error("Failed to save posts after deletion")
+        return render_template('error.html', message="Failed to save changes", status=500)
 
     return redirect(url_for('index'))
 
@@ -130,18 +162,19 @@ def update(post_id):
     # Fetch the post by ID
     post = fetch_post_by_id(post_id)
     if post is None:
-        return "Post not found", 404
+        logging.error(f"Post not found: ID {post_id}")
+        return render_template('error.html', message="Post not found", status=404)
 
     if request.method == 'POST':
-        # Get form data
-        author = request.form.get('author')
-        title = request.form.get('title')
-        content = request.form.get('content')
+        # Get and sanitize form data
+        author = escape(request.form.get('author', ''))
+        title = escape(request.form.get('title', ''))
+        content = escape(request.form.get('content', ''))
 
         # Validate inputs
         is_valid, error = validate_post_data(author, title, content)
         if not is_valid:
-            return error, 400
+            return render_template('error.html', message=error, status=400)
 
         # Load existing posts
         posts = load_posts()
@@ -156,12 +189,43 @@ def update(post_id):
 
         # Save updated posts
         if not save_posts(posts):
-            return "Failed to save changes", 500
+            logging.error("Failed to save updated post")
+            return render_template('error.html', message="Failed to save changes", status=500)
 
         return redirect(url_for('index'))
 
-    # Display the update form with current post data
-    return render_template('update.html', post=post)
+    try:
+        # Display the update form with current post data
+        return render_template('update.html', post=post)
+    except TemplateNotFound as e:
+        logging.error(f"Template not found: {str(e)}")
+        return render_template('error.html', message="Template not found", status=500)
+
+
+@app.route('/like/<int:post_id>', methods=['POST'])
+def like(post_id):
+    """Increment the likes count for a blog post by its ID."""
+    # Check if post exists
+    post = fetch_post_by_id(post_id)
+    if post is None:
+        logging.error(f"Post not found: ID {post_id}")
+        return render_template('error.html', message="Post not found", status=404)
+
+    # Load existing posts
+    posts = load_posts()
+
+    # Increment likes for the post
+    for post in posts:
+        if post['id'] == post_id:
+            post['likes'] = post.get('likes', 0) + 1
+            break
+
+    # Save updated posts
+    if not save_posts(posts):
+        logging.error("Failed to save posts after liking")
+        return render_template('error.html', message="Failed to save changes", status=500)
+
+    return redirect(url_for('index'))
 
 
 if __name__ == '__main__':
