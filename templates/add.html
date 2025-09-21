@@ -12,18 +12,18 @@
         <form method="POST" action="{{ url_for('add') }}">
             <p>
                 <label for="author">Author:</label><br>
-                <input type="text" id="author" name="author" required>
+                <input type="text" id="author" name="author" maxlength="100" required>
             </p>
             <p>
                 <label for="title">Title:</label><br>
-                <input type="text" id="title" name="title" required>
+                <input type="text" id="title" name="title" maxlength="200" required>
             </p>
             <p>
                 <label for="content">Content:</label><br>
-                <textarea id="content" name="content" rows="5" required></textarea>
+                <textarea id="content" name="content" rows="5" maxlength="10000" required></textarea>
             </p>
             <p>
-                <button type="submit">Submit Post</button>
+                <button type="submit" class="submit-button">Submit Post</button>
             </p>
         </form>
         <p><a href="{{ url_for('index') }}">Back to Home</a></p>

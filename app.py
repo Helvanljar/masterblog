@@ -4,27 +4,42 @@ import json
 app = Flask(__name__)
 
 
-# Function to load blog posts from JSON file
 def load_posts():
+    """Load blog posts from posts.json or return default posts if file is missing."""
     try:
         with open('posts.json', 'r') as file:
             return json.load(file)
-    except FileNotFoundError:
-        # Return default posts if file doesn't exist
+    except (FileNotFoundError, json.JSONDecodeError):
+        # Return default posts if file doesn't exist or is invalid
         return [
-            {"id": 1, "author": "John Doe", "title": "First Post", "content": "This is my first post."},
-            {"id": 2, "author": "Jane Doe", "title": "Second Post", "content": "This is another post."}
+            {
+                "id": 1,
+                "author": "John Doe",
+                "title": "First Post",
+                "content": "This is my first post."
+            },
+            {
+                "id": 2,
+                "author": "Jane Doe",
+                "title": "Second Post",
+                "content": "This is another post."
+            }
         ]
 
 
-# Function to save blog posts to JSON file
 def save_posts(posts):
-    with open('posts.json', 'w') as file:
-        json.dump(posts, file, indent=4)
+    """Save blog posts to posts.json."""
+    try:
+        with open('posts.json', 'w') as file:
+            json.dump(posts, file, indent=4)
+    except (IOError, PermissionError):
+        # Log error or handle gracefully (for now, return False to indicate failure)
+        return False
+    return True
 
 
-# Function to fetch a post by ID
 def fetch_post_by_id(post_id):
+    """Fetch a single post by its ID or return None if not found."""
     posts = load_posts()
     for post in posts:
         if post['id'] == post_id:
@@ -32,19 +47,38 @@ def fetch_post_by_id(post_id):
     return None
 
 
+def validate_post_data(author, title, content):
+    """Validate post data, ensuring non-empty and reasonable length."""
+    max_lengths = {'author': 100, 'title': 200, 'content': 10000}
+    if not all([author, title, content]):
+        return False, "All fields are required."
+    if any(len(field) > max_lengths[key] for field, key in [
+        (author, 'author'), (title, 'title'), (content, 'content')
+    ]):
+        return False, "Input exceeds maximum length."
+    return True, ""
+
+
 @app.route('/')
 def index():
-    blog_posts = load_posts()
-    return render_template('index.html', posts=blog_posts)
+    """Display the list of blog posts."""
+    posts = load_posts()
+    return render_template('index.html', posts=posts)
 
 
 @app.route('/add', methods=['GET', 'POST'])
 def add():
+    """Handle adding a new blog post."""
     if request.method == 'POST':
         # Get form data
         author = request.form.get('author')
         title = request.form.get('title')
         content = request.form.get('content')
+
+        # Validate inputs
+        is_valid, error = validate_post_data(author, title, content)
+        if not is_valid:
+            return error, 400
 
         # Load existing posts
         posts = load_posts()
@@ -62,7 +96,8 @@ def add():
 
         # Add new post and save to JSON
         posts.append(new_post)
-        save_posts(posts)
+        if not save_posts(posts):
+            return "Failed to save post", 500
 
         return redirect(url_for('index'))
 
@@ -71,6 +106,11 @@ def add():
 
 @app.route('/delete/<int:post_id>')
 def delete(post_id):
+    """Delete a blog post by its ID."""
+    # Check if post exists
+    if fetch_post_by_id(post_id) is None:
+        return "Post not found", 404
+
     # Load existing posts
     posts = load_posts()
 
@@ -78,13 +118,15 @@ def delete(post_id):
     posts = [post for post in posts if post['id'] != post_id]
 
     # Save updated posts
-    save_posts(posts)
+    if not save_posts(posts):
+        return "Failed to save changes", 500
 
     return redirect(url_for('index'))
 
 
 @app.route('/update/<int:post_id>', methods=['GET', 'POST'])
 def update(post_id):
+    """Handle updating an existing blog post."""
     # Fetch the post by ID
     post = fetch_post_by_id(post_id)
     if post is None:
@@ -96,19 +138,25 @@ def update(post_id):
         title = request.form.get('title')
         content = request.form.get('content')
 
+        # Validate inputs
+        is_valid, error = validate_post_data(author, title, content)
+        if not is_valid:
+            return error, 400
+
         # Load existing posts
         posts = load_posts()
 
         # Update the post
-        for p in posts:
-            if p['id'] == post_id:
-                p['author'] = author
-                p['title'] = title
-                p['content'] = content
+        for post in posts:
+            if post['id'] == post_id:
+                post['author'] = author
+                post['title'] = title
+                post['content'] = content
                 break
 
         # Save updated posts
-        save_posts(posts)
+        if not save_posts(posts):
+            return "Failed to save changes", 500
 
         return redirect(url_for('index'))
 
